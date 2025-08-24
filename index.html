@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Screen Share - Works Instantly!</title>
+    <script src="https://unpkg.com/peerjs@1.5.1/dist/peerjs.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: rgba(255, 255, 255, 0.98);
+            border-radius: 20px;
+            padding: 30px;
+            max-width: 900px;
+            width: 100%;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 2em;
+            text-align: center;
+        }
+        
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+        
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 30px;
+            background: #f5f5f5;
+            padding: 5px;
+            border-radius: 10px;
+        }
+        
+        .tab {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            border-radius: 8px;
+            font-size: 1em;
+            transition: all 0.3s;
+            color: #666;
+        }
+        
+        .tab.active {
+            background: white;
+            color: #667eea;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .panel {
+            display: none;
+        }
+        
+        .panel.active {
+            display: block;
+            animation: fadeIn 0.3s;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 25px;
+            font-size: 1em;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin: 5px;
+            display: inline-block;
+        }
+        
+        .button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+        
+        .button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .button.stop {
+            background: linear-gradient(135deg, #f56565 0%, #c53030 100%);
+        }
+        
+        .button.success {
+            background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+        }
+        
+        .code-display {
+            background: #1a1a2e;
+            color: #00ff88;
+            padding: 20px;
+            border-radius: 15px;
+            text-align: center;
+            margin: 20px 0;
+            position: relative;
+        }
+        
+        .code-display .label {
+            color: #888;
+            font-size: 0.9em;
+            margin-bottom: 10px;
+        }
+        
+        .code-display .code {
+            font-size: 2.5em;
+            font-family: 'Courier New', monospace;
+            letter-spacing: 0.1em;
+            font-weight: bold;
+        }
+        
+        .code-display .copy-hint {
+            color: #666;
+            font-size: 0.8em;
+            margin-top: 10px;
+        }
+        
+        input[type="text"] {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 1.2em;
+            text-align: center;
+            margin: 10px 0;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            font-family: 'Courier New', monospace;
+        }
+        
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        video {
+            width: 100%;
+            border-radius: 15px;
+            background: #000;
+            margin-top: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+        
+        .status {
+            padding: 12px;
+            border-radius: 8px;
+            margin: 15px 0;
+            text-align: center;
+            font-size: 0.95em;
+        }
+        
+        .status.info {
+            background: #e6f3ff;
+            color: #0066cc;
+            border: 1px solid #b3d9ff;
+        }
+        
+        .status.success {
+            background: #d4f4dd;
+            color: #22543d;
+            border: 1px solid #9ae6b4;
+        }
+        
+        .status.error {
+            background: #fee;
+            color: #c53030;
+            border: 1px solid #fc8181;
+        }
+        
+        .status.warning {
+            background: #fffae6;
+            color: #744210;
+            border: 1px solid #f6e05e;
+        }
+        
+        .steps {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        
+        .step {
+            display: flex;
+            align-items: center;
+            margin: 10px 0;
+        }
+        
+        .step-number {
+            background: #667eea;
+            color: white;
+            width: 25px;
+            height: 25px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 15px;
+            font-weight: bold;
+            font-size: 0.9em;
+        }
+        
+        .step.completed .step-number {
+            background: #48bb78;
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-left: 10px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .info-box {
+            background: #f0f7ff;
+            border-left: 4px solid #667eea;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 15px 0;
+        }
+        
+        .center {
+            text-align: center;
+        }
+
+        @media (max-width: 600px) {
+            h1 { font-size: 1.5em; }
+            .code-display .code { font-size: 2em; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🖥️ → 📱 Screen Share</h1>
+        <p class="subtitle">Share your laptop screen to iPad instantly!</p>
+        
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('share')">
+                💻 Share Screen (Laptop)
+            </button>
+            <button class="tab" onclick="switchTab('view')">
+                📱 View Screen (iPad)
+            </button>
+        </div>
+        
+        <!-- Share Screen Panel (Laptop) -->
+        <div id="sharePanel" class="panel active">
+            <div class="info-box">
+                <strong>Quick Start:</strong> Click "Start Sharing" below, choose what to share, then give the code to your iPad.
+            </div>
+            
+            <div class="center">
+                <button id="startBtn" class="button" onclick="startSharing()">
+                    🚀 Start Sharing
+                </button>
+                <button id="stopBtn" class="button stop" onclick="stopSharing()" style="display:none;">
+                    ⏹️ Stop Sharing
+                </button>
+            </div>
+            
+            <div id="shareStatus"></div>
+            
+            <div id="codeDisplay" class="code-display" style="display:none;">
+                <div class="label">Your Connection Code:</div>
+                <div id="myCode" class="code">----</div>
+                <div class="copy-hint">Enter this code on your iPad</div>
+            </div>
+            
+            <video id="localVideo" autoplay muted playsinline style="display:none;"></video>
+            
+            <div id="connectionStatus"></div>
+        </div>
+        
+        <!-- View Screen Panel (iPad) -->
+        <div id="viewPanel" class="panel">
+            <div class="info-box">
+                <strong>To Connect:</strong> Enter the code shown on your laptop screen
+            </div>
+            
+            <input type="text" 
+                   id="codeInput" 
+                   placeholder="ENTER CODE" 
+                   maxlength="20"
+                   autocomplete="off">
+            
+            <div class="center">
+                <button id="connectBtn" class="button success" onclick="connectToScreen()">
+                    📡 Connect to Screen
+                </button>
+                <button id="disconnectBtn" class="button stop" onclick="disconnectFromScreen()" style="display:none;">
+                    ❌ Disconnect
+                </button>
+            </div>
+            
+            <div id="viewStatus"></div>
+            
+            <video id="remoteVideo" autoplay playsinline style="display:none;"></video>
+        </div>
+    </div>
+
+    <script>
+        let peer = null;
+        let conn = null;
+        let call = null;
+        let localStream = null;
+        let peerId = null;
+        
+        // Initialize PeerJS
+        function initPeer() {
+            // Generate a simple ID
+            const randomId = Math.random().toString(36).substring(2, 8).toUpperCase();
+            
+            peer = new Peer(randomId, {
+                host: 'peerjs.com',
+                port: 443,
+                secure: true,
+                debug: 2
+            });
+            
+            peer.on('open', function(id) {
+                peerId = id;
+                console.log('My peer ID is: ' + id);
+            });
+            
+            peer.on('error', function(err) {
+                console.error('PeerJS error:', err);
+                if (err.type === 'unavailable-id') {
+                    // ID taken, try again with new ID
+                    initPeer();
+                } else {
+                    showStatus('shareStatus', 'error', '❌ Connection error: ' + err.type);
+                }
+            });
+            
+            // Handle incoming calls (for receiver)
+            peer.on('call', function(incomingCall) {
+                call = incomingCall;
+                call.answer(); // Answer without stream (we're just receiving)
+                
+                call.on('stream', function(remoteStream) {
+                    const video = document.getElementById('remoteVideo');
+                    video.srcObject = remoteStream;
+                    video.style.display = 'block';
+                    showStatus('viewStatus', 'success', '✅ Connected! Viewing screen');
+                });
+                
+                call.on('close', function() {
+                    showStatus('viewStatus', 'warning', '📡 Connection ended');
+                    document.getElementById('remoteVideo').style.display = 'none';
+                });
+            });
+        }
+        
+        // Switch between tabs
+        function switchTab(tab) {
+            // Update tab buttons
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            // Update panels
+            document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+            
+            if (tab === 'share') {
+                document.getElementById('sharePanel').classList.add('active');
+            } else {
+                document.getElementById('viewPanel').classList.add('active');
+            }
+        }
+        
+        // Start sharing screen
+        async function startSharing() {
+            try {
+                // Initialize peer if not already done
+                if (!peer) {
+                    initPeer();
+                    showStatus('shareStatus', 'info', '⏳ Initializing connection...');
+                    
+                    // Wait for peer to be ready
+                    await new Promise((resolve) => {
+                        const checkInterval = setInterval(() => {
+                            if (peerId) {
+                                clearInterval(checkInterval);
+                                resolve();
+                            }
+                        }, 100);
+                    });
+                }
+                
+                // Get screen share
+                showStatus('shareStatus', 'info', '📺 Please select what to share...');
+                
+                localStream = await navigator.mediaDevices.getDisplayMedia({
+                    video: {
+                        cursor: "always"
+                    },
+                    audio: false  // Set to true if you want to share audio too
+                });
+                
+                // Show preview
+                const video = document.getElementById('localVideo');
+                video.srcObject = localStream;
+                video.style.display = 'block';
+                
+                // Show code
+                document.getElementById('myCode').textContent = peerId;
+                document.getElementById('codeDisplay').style.display = 'block';
+                
+                // Update UI
+                document.getElementById('startBtn').style.display = 'none';
+                document.getElementById('stopBtn').style.display = 'inline-block';
+                
+                showStatus('shareStatus', 'success', '✅ Sharing active! Share the code with your iPad');
+                
+                // Handle stream ending
+                localStream.getVideoTracks()[0].onended = () => {
+                    stopSharing();
+                };
+                
+            } catch (err) {
+                console.error('Error:', err);
+                if (err.name === 'NotAllowedError') {
+                    showStatus('shareStatus', 'error', '❌ Screen sharing was cancelled or denied');
+                } else {
+                    showStatus('shareStatus', 'error', '❌ Error: ' + err.message);
+                }
+            }
+        }
+        
+        // Stop sharing
+        function stopSharing() {
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
+            
+            if (call) {
+                call.close();
+                call = null;
+            }
+            
+            document.getElementById('localVideo').style.display = 'none';
+            document.getElementById('codeDisplay').style.display = 'none';
+            document.getElementById('startBtn').style.display = 'inline-block';
+            document.getElementById('stopBtn').style.display = 'none';
+            
+            showStatus('shareStatus', 'info', '📡 Sharing stopped');
+        }
+        
+        // Connect to a screen share
+        async function connectToScreen() {
+            const code = document.getElementById('codeInput').value.trim().toUpperCase();
+            
+            if (!code) {
+                showStatus('viewStatus', 'error', '❌ Please enter a connection code');
+                return;
+            }
+            
+            try {
+                // Initialize peer if needed
+                if (!peer) {
+                    initPeer();
+                    showStatus('viewStatus', 'info', '⏳ Initializing...');
+                    
+                    await new Promise((resolve) => {
+                        const checkInterval = setInterval(() => {
+                            if (peerId) {
+                                clearInterval(checkInterval);
+                                resolve();
+                            }
+                        }, 100);
+                    });
+                }
+                
+                showStatus('viewStatus', 'info', '🔄 Connecting to ' + code + '...');
+                
+                // Call the peer
+                const dummyStream = await createDummyStream();
+                call = peer.call(code, dummyStream);
+                
+                if (!call) {
+                    showStatus('viewStatus', 'error', '❌ Could not connect. Check the code and try again.');
+                    return;
+                }
+                
+                call.on('stream', function(remoteStream) {
+                    const video = document.getElementById('remoteVideo');
+                    video.srcObject = remoteStream;
+                    video.style.display = 'block';
+                    
+                    document.getElementById('connectBtn').style.display = 'none';
+                    document.getElementById('disconnectBtn').style.display = 'inline-block';
+                    
+                    showStatus('viewStatus', 'success', '✅ Connected! You should see the screen');
+                });
+                
+                call.on('close', function() {
+                    disconnectFromScreen();
+                });
+                
+                call.on('error', function(err) {
+                    showStatus('viewStatus', 'error', '❌ Connection failed: ' + err);
+                    disconnectFromScreen();
+                });
+                
+                // Timeout if no connection
+                setTimeout(() => {
+                    if (call && !document.getElementById('remoteVideo').srcObject) {
+                        showStatus('viewStatus', 'error', '❌ Connection timeout. Is the code correct and is the laptop sharing?');
+                        disconnectFromScreen();
+                    }
+                }, 10000);
+                
+            } catch (err) {
+                console.error('Connection error:', err);
+                showStatus('viewStatus', 'error', '❌ Error: ' + err.message);
+            }
+        }
+        
+        // Create dummy stream for answering
+        async function createDummyStream() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 1;
+            canvas.height = 1;
+            const ctx = canvas.getContext('2d');
+            ctx.fillRect(0, 0, 1, 1);
+            const stream = canvas.captureStream();
+            return stream;
+        }
+        
+        // Disconnect from screen
+        function disconnectFromScreen() {
+            if (call) {
+                call.close();
+                call = null;
+            }
+            
+            const video = document.getElementById('remoteVideo');
+            video.srcObject = null;
+            video.style.display = 'none';
+            
+            document.getElementById('connectBtn').style.display = 'inline-block';
+            document.getElementById('disconnectBtn').style.display = 'none';
+            
+            showStatus('viewStatus', 'info', '📡 Disconnected');
+        }
+        
+        // Show status message
+        function showStatus(elementId, type, message) {
+            const element = document.getElementById(elementId);
+            element.className = 'status ' + type;
+            element.textContent = message;
+            element.style.display = message ? 'block' : 'none';
+        }
+        
+        // Auto-uppercase input
+        document.getElementById('codeInput').addEventListener('input', function(e) {
+            e.target.value = e.target.value.toUpperCase();
+        });
+        
+        // Initialize on load
+        window.addEventListener('load', function() {
+            // Check browser compatibility
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+                showStatus('shareStatus', 'error', '❌ Your browser doesn\'t support screen sharing. Use Chrome, Edge, or Firefox.');
+            }
+        });
+    </script>
+</body>
+</html>
