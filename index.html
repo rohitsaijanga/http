@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Screen Share with Audio - Fixed Version</title>
+    <title>Screen Share with Audio - Robust Version</title>
     <script src="https://unpkg.com/peerjs@1.5.1/dist/peerjs.min.js"></script>
     <style>
         * {
@@ -152,12 +152,6 @@
             font-size: 0.8em;
         }
         
-        .code-display .copy-hint {
-            color: #666;
-            font-size: 0.8em;
-            margin-top: 10px;
-        }
-        
         input[type="text"] {
             width: 100%;
             padding: 15px;
@@ -235,6 +229,33 @@
             font-size: 0.9em;
         }
         
+        .connection-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-left: 10px;
+            animation: pulse 2s infinite;
+        }
+        
+        .connection-indicator.connected {
+            background: #48bb78;
+        }
+        
+        .connection-indicator.waiting {
+            background: #ffc107;
+        }
+        
+        .connection-indicator.error {
+            background: #f56565;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
         .center {
             text-align: center;
         }
@@ -255,6 +276,25 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+        
+        .troubleshoot {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 10px;
+            padding: 15px;
+            margin: 15px 0;
+            font-size: 0.9em;
+        }
+        
+        .troubleshoot h4 {
+            margin-bottom: 10px;
+            color: #495057;
+        }
+        
+        .troubleshoot ul {
+            margin-left: 20px;
+            color: #6c757d;
+        }
 
         @media (max-width: 600px) {
             h1 { font-size: 1.5em; }
@@ -265,7 +305,7 @@
 <body>
     <div class="container">
         <h1>🖥️ → 📱 Screen Share</h1>
-        <p class="subtitle">Share your laptop screen WITH AUDIO to iPad instantly!</p>
+        <p class="subtitle">Share your laptop screen WITH AUDIO to iPad!</p>
         
         <div class="tabs">
             <button class="tab active" onclick="switchTab('share', this)">
@@ -279,16 +319,18 @@
         <!-- Share Screen Panel (Laptop) -->
         <div id="sharePanel" class="panel active">
             <div class="info-box">
-                <strong>Quick Start:</strong> Click "Start Sharing" below, choose what to share, then give the code to your iPad.
+                <strong>Connection Status:</strong> 
+                <span id="connectionState">Initializing...</span>
+                <span id="connectionIndicator" class="connection-indicator waiting"></span>
             </div>
             
             <div class="audio-notice">
-                🔊 <strong>Audio Sharing:</strong> When selecting what to share, check "Share audio" to include sound!
+                🔊 <strong>For Audio:</strong> When sharing, check "Share audio" or "Share system audio" in the browser dialog!
             </div>
             
             <div class="center">
-                <button id="startBtn" class="button" onclick="startSharing()">
-                    🚀 Start Sharing
+                <button id="startBtn" class="button" onclick="startSharing()" disabled>
+                    ⏳ Initializing...
                 </button>
                 <button id="stopBtn" class="button stop" onclick="stopSharing()" style="display:none;">
                     ⏹️ Stop Sharing
@@ -310,13 +352,15 @@
         <!-- View Screen Panel (iPad) -->
         <div id="viewPanel" class="panel">
             <div class="info-box">
-                <strong>To Connect:</strong> Enter the code shown on your laptop screen
+                <strong>Connection Status:</strong> 
+                <span id="viewConnectionState">Ready</span>
+                <span id="viewConnectionIndicator" class="connection-indicator waiting"></span>
             </div>
             
             <input type="text" 
                    id="codeInput" 
                    placeholder="ENTER CODE" 
-                   maxlength="20"
+                   maxlength="10"
                    autocomplete="off">
             
             <div class="center">
@@ -331,128 +375,186 @@
             <div id="viewStatus"></div>
             
             <video id="remoteVideo" autoplay playsinline controls style="display:none;"></video>
+            
+            <div class="troubleshoot" style="display:none;" id="troubleshoot">
+                <h4>🔧 Troubleshooting:</h4>
+                <ul>
+                    <li>Make sure the laptop is actively sharing (code should be visible)</li>
+                    <li>Double-check the code is entered correctly</li>
+                    <li>Both devices need internet access</li>
+                    <li>Try refreshing both pages and starting over</li>
+                    <li>If still not working, try the alternative method below</li>
+                </ul>
+            </div>
+        </div>
+        
+        <div style="margin-top: 20px; padding: 15px; background: #e8f5e9; border-radius: 10px; text-align: center;">
+            <strong>Alternative:</strong> If connection fails, try 
+            <a href="https://meet.jit.si" target="_blank" style="color: #667eea;">Jitsi Meet</a> 
+            (works instantly, no code needed!)
         </div>
     </div>
 
     <script>
+        // Global variables
         let peer = null;
-        let conn = null;
         let call = null;
         let localStream = null;
-        let peerId = null;
-        let isInitialized = false;
+        let currentPeerId = null;
+        let connectionCheckInterval = null;
         
-        // Initialize PeerJS when page loads
-        window.addEventListener('load', function() {
-            initializePeer();
-        });
+        // Generate simple code
+        function generateSimpleCode() {
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+            let code = '';
+            for (let i = 0; i < 6; i++) {
+                code += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            return code;
+        }
         
-        // Initialize PeerJS with better error handling
-        function initializePeer() {
+        // Initialize PeerJS with retries
+        async function initializePeer(retryCount = 0) {
             return new Promise((resolve, reject) => {
-                if (isInitialized && peer && !peer.destroyed) {
-                    resolve();
-                    return;
-                }
-                
-                // Generate a random ID
-                const randomId = 'screen-' + Math.random().toString(36).substring(2, 8).toUpperCase();
-                
                 try {
-                    peer = new Peer(randomId, {
-                        debug: 2
+                    // Clean up old peer if exists
+                    if (peer && !peer.destroyed) {
+                        peer.destroy();
+                    }
+                    
+                    // Generate a new ID
+                    const simpleCode = generateSimpleCode();
+                    currentPeerId = simpleCode;
+                    
+                    // Create peer with multiple server options
+                    const servers = [
+                        { host: '0.peerjs.com', port: 443, secure: true },
+                        { host: 'peerjs.com', port: 443, secure: true }
+                    ];
+                    
+                    const serverConfig = servers[retryCount % servers.length];
+                    
+                    peer = new Peer(simpleCode, {
+                        ...serverConfig,
+                        debug: 2,
+                        config: {
+                            'iceServers': [
+                                { urls: 'stun:stun.l.google.com:19302' },
+                                { urls: 'stun:stun1.l.google.com:19302' },
+                                { urls: 'stun:stun2.l.google.com:19302' }
+                            ]
+                        }
                     });
                     
+                    // Set up event handlers
                     peer.on('open', function(id) {
-                        peerId = id;
-                        isInitialized = true;
                         console.log('Connected with ID:', id);
-                        resolve();
+                        currentPeerId = id;
+                        updateConnectionStatus('connected', 'Connected to server');
+                        
+                        // Enable start button
+                        const startBtn = document.getElementById('startBtn');
+                        startBtn.disabled = false;
+                        startBtn.textContent = '🚀 Start Sharing';
+                        
+                        resolve(peer);
+                    });
+                    
+                    peer.on('disconnected', function() {
+                        updateConnectionStatus('waiting', 'Reconnecting...');
+                        // Try to reconnect
+                        if (!peer.destroyed) {
+                            setTimeout(() => peer.reconnect(), 1000);
+                        }
                     });
                     
                     peer.on('error', function(err) {
                         console.error('PeerJS error:', err);
                         
-                        if (err.type === 'network' || err.type === 'server-error') {
-                            // Try fallback to default PeerJS server
-                            peer.destroy();
-                            peer = new Peer(randomId);
-                            
-                            peer.on('open', function(id) {
-                                peerId = id;
-                                isInitialized = true;
-                                console.log('Connected with fallback server, ID:', id);
-                                resolve();
-                            });
-                            
-                            peer.on('error', function(fallbackErr) {
-                                console.error('Fallback also failed:', fallbackErr);
-                                showStatus('shareStatus', 'error', '❌ Connection error. Please refresh the page.');
-                                reject(fallbackErr);
-                            });
-                        } else if (err.type === 'unavailable-id') {
-                            // ID taken, generate new one
-                            peer.destroy();
-                            isInitialized = false;
-                            initializePeer().then(resolve).catch(reject);
+                        if (err.type === 'unavailable-id' && retryCount < 3) {
+                            // ID taken, try with new ID
+                            setTimeout(() => {
+                                initializePeer(retryCount + 1).then(resolve).catch(reject);
+                            }, 500);
+                        } else if ((err.type === 'network' || err.type === 'server-error') && retryCount < 3) {
+                            // Network error, try different server
+                            updateConnectionStatus('error', 'Connection failed, retrying...');
+                            setTimeout(() => {
+                                initializePeer(retryCount + 1).then(resolve).catch(reject);
+                            }, 1000);
                         } else {
-                            showStatus('shareStatus', 'error', '❌ Connection error: ' + err.type);
+                            updateConnectionStatus('error', 'Connection failed');
                             reject(err);
                         }
                     });
                     
-                    // Handle incoming calls (for receiver)
+                    // Handle incoming calls
                     peer.on('call', function(incomingCall) {
-                        console.log('Receiving call');
+                        console.log('Incoming call from:', incomingCall.peer);
                         call = incomingCall;
-                        call.answer(); // Answer without stream (we're just receiving)
+                        
+                        // Answer the call
+                        call.answer();
                         
                         call.on('stream', function(remoteStream) {
-                            console.log('Got remote stream');
+                            console.log('Received stream');
                             const video = document.getElementById('remoteVideo');
                             video.srcObject = remoteStream;
                             video.style.display = 'block';
-                            showStatus('viewStatus', 'success', '✅ Connected! You should see and hear the screen');
+                            
+                            const hasAudio = remoteStream.getAudioTracks().length > 0;
+                            const audioStatus = hasAudio ? '🔊 with audio' : '🔇 no audio';
+                            showStatus('viewStatus', 'success', `✅ Connected ${audioStatus}`);
+                            updateViewConnectionStatus('connected', 'Receiving screen');
                         });
                         
                         call.on('close', function() {
+                            console.log('Call ended');
+                            const video = document.getElementById('remoteVideo');
+                            video.style.display = 'none';
                             showStatus('viewStatus', 'warning', '📡 Connection ended');
-                            document.getElementById('remoteVideo').style.display = 'none';
-                        });
-                        
-                        call.on('error', function(err) {
-                            console.error('Call error:', err);
-                            showStatus('viewStatus', 'error', '❌ Connection lost');
+                            updateViewConnectionStatus('waiting', 'Disconnected');
                         });
                     });
                     
-                    // Handle disconnection
-                    peer.on('disconnected', function() {
-                        console.log('Disconnected from server');
-                        if (!peer.destroyed) {
-                            peer.reconnect();
+                    // Timeout for initial connection
+                    setTimeout(() => {
+                        if (!peer.open && retryCount < 3) {
+                            peer.destroy();
+                            initializePeer(retryCount + 1).then(resolve).catch(reject);
                         }
-                    });
-                    
-                    peer.on('close', function() {
-                        console.log('Peer connection closed');
-                        isInitialized = false;
-                    });
+                    }, 5000);
                     
                 } catch (err) {
                     console.error('Failed to create peer:', err);
+                    updateConnectionStatus('error', 'Failed to initialize');
                     reject(err);
                 }
             });
         }
         
-        // Switch between tabs
+        // Update connection status display
+        function updateConnectionStatus(state, message) {
+            const statusText = document.getElementById('connectionState');
+            const indicator = document.getElementById('connectionIndicator');
+            
+            statusText.textContent = message;
+            indicator.className = 'connection-indicator ' + state;
+        }
+        
+        function updateViewConnectionStatus(state, message) {
+            const statusText = document.getElementById('viewConnectionState');
+            const indicator = document.getElementById('viewConnectionIndicator');
+            
+            statusText.textContent = message;
+            indicator.className = 'connection-indicator ' + state;
+        }
+        
+        // Switch tabs
         function switchTab(tab, element) {
-            // Update tab buttons
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
             element.classList.add('active');
             
-            // Update panels
             document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
             
             if (tab === 'share') {
@@ -462,71 +564,73 @@
             }
         }
         
-        // Start sharing screen
+        // Start sharing
         async function startSharing() {
             try {
-                // Disable button during initialization
-                document.getElementById('startBtn').disabled = true;
-                showStatus('shareStatus', 'info', '⏳ Initializing connection...<span class="loading"></span>');
+                const startBtn = document.getElementById('startBtn');
+                startBtn.disabled = true;
                 
-                // Make sure peer is initialized
-                await initializePeer();
+                showStatus('shareStatus', 'info', '📺 Please select what to share and enable audio...');
                 
-                // Get screen share with audio
-                showStatus('shareStatus', 'info', '📺 Please select what to share (check "Share audio" for sound!)...');
-                
+                // Get display media
                 try {
                     localStream = await navigator.mediaDevices.getDisplayMedia({
                         video: {
                             cursor: "always",
                             displaySurface: "monitor"
                         },
-                        audio: true  // Request audio - user can still choose not to share
+                        audio: {
+                            echoCancellation: false,
+                            noiseSuppression: false,
+                            sampleRate: 44100
+                        }
                     });
                 } catch (err) {
-                    // Fallback without audio if it fails
-                    console.log('Trying without audio...');
+                    // Fallback without audio
                     localStream = await navigator.mediaDevices.getDisplayMedia({
-                        video: {
-                            cursor: "always"
-                        },
-                        audio: false
+                        video: { cursor: "always" }
                     });
                 }
                 
-                // Check if we got audio
+                // Check audio
                 const hasAudio = localStream.getAudioTracks().length > 0;
+                const audioStatus = hasAudio ? '🔊 Audio enabled' : '🔇 No audio (check "Share audio" next time)';
                 
                 // Show preview
                 const video = document.getElementById('localVideo');
                 video.srcObject = localStream;
                 video.style.display = 'block';
                 
-                // Show code (using the simplified peer ID)
-                const displayCode = peerId.replace('screen-', '').toUpperCase();
-                document.getElementById('myCode').textContent = displayCode;
+                // Show code
+                document.getElementById('myCode').textContent = currentPeerId;
                 document.getElementById('codeDisplay').style.display = 'block';
                 
                 // Update UI
                 document.getElementById('startBtn').style.display = 'none';
                 document.getElementById('stopBtn').style.display = 'inline-block';
                 
-                const audioStatus = hasAudio ? '🔊 with audio' : '🔇 without audio';
-                showStatus('shareStatus', 'success', `✅ Sharing active ${audioStatus}! Share code: ${displayCode}`);
+                showStatus('shareStatus', 'success', `✅ Sharing! ${audioStatus} | Code: ${currentPeerId}`);
                 
-                // Handle stream ending
+                // Monitor for stop
                 localStream.getVideoTracks()[0].onended = () => {
                     stopSharing();
                 };
                 
+                // Keep connection alive
+                connectionCheckInterval = setInterval(() => {
+                    if (peer && peer.disconnected && !peer.destroyed) {
+                        peer.reconnect();
+                    }
+                }, 5000);
+                
             } catch (err) {
-                console.error('Error:', err);
-                document.getElementById('startBtn').disabled = false;
+                console.error('Sharing error:', err);
+                startBtn.disabled = false;
                 
                 if (err.name === 'NotAllowedError') {
-                    showStatus('shareStatus', 'error', '❌ Screen sharing was cancelled or denied');
+                    showStatus('shareStatus', 'error', '❌ Screen sharing cancelled');
                 } else {
-                    showStatus('shareStatus', 'error', '❌ Error: ' + err.message);
+                    showStatus('shareStatus', 'error', '❌ Could not start sharing');
                 }
             }
         }
@@ -543,97 +647,106 @@
                 call = null;
             }
             
+            if (connectionCheckInterval) {
+                clearInterval(connectionCheckInterval);
+                connectionCheckInterval = null;
+            }
+            
             document.getElementById('localVideo').style.display = 'none';
             document.getElementById('codeDisplay').style.display = 'none';
             document.getElementById('startBtn').style.display = 'inline-block';
             document.getElementById('startBtn').disabled = false;
             document.getElementById('stopBtn').style.display = 'none';
             
-            showStatus('shareStatus', 'info', '📡 Sharing stopped');
+            showStatus('shareStatus', 'info', 'Sharing stopped');
         }
         
-        // Connect to a screen share
+        // Connect to screen
         async function connectToScreen() {
             const code = document.getElementById('codeInput').value.trim().toUpperCase();
             
-            if (!code) {
-                showStatus('viewStatus', 'error', '❌ Please enter a connection code');
+            if (!code || code.length < 4) {
+                showStatus('viewStatus', 'error', '❌ Please enter the code');
                 return;
             }
             
             try {
                 document.getElementById('connectBtn').disabled = true;
+                showStatus('viewStatus', 'info', `🔄 Connecting to ${code}...`);
+                updateViewConnectionStatus('waiting', 'Connecting...');
                 
                 // Initialize peer if needed
-                showStatus('viewStatus', 'info', '⏳ Initializing...<span class="loading"></span>');
-                await initializePeer();
+                if (!peer || peer.destroyed) {
+                    await initializePeer();
+                }
                 
-                // Add prefix back to code
-                const fullPeerId = 'screen-' + code.toLowerCase();
+                // Wait a bit for peer to be ready
+                await new Promise(resolve => setTimeout(resolve, 1000));
                 
-                showStatus('viewStatus', 'info', '🔄 Connecting to ' + code + '...<span class="loading"></span>');
-                
-                // Create a dummy stream for the call
+                // Create dummy stream
                 const canvas = document.createElement('canvas');
                 canvas.width = 1;
                 canvas.height = 1;
-                const ctx = canvas.getContext('2d');
-                ctx.fillRect(0, 0, 1, 1);
-                const dummyStream = canvas.captureStream(1);
+                const stream = canvas.captureStream(1);
                 
-                // Call the peer
-                call = peer.call(fullPeerId, dummyStream);
+                // Make the call
+                console.log('Calling peer:', code);
+                call = peer.call(code, stream);
                 
                 if (!call) {
-                    throw new Error('Could not establish connection');
+                    throw new Error('Call failed to initialize');
                 }
                 
                 let connected = false;
                 
                 call.on('stream', function(remoteStream) {
                     connected = true;
-                    console.log('Received stream with', remoteStream.getAudioTracks().length, 'audio tracks');
-                    
+                    console.log('Got stream');
                     const video = document.getElementById('remoteVideo');
                     video.srcObject = remoteStream;
                     video.style.display = 'block';
                     
-                    // Show audio indicator
-                    const hasAudio = remoteStream.getAudioTracks().length > 0;
-                    const audioStatus = hasAudio ? '🔊 Audio enabled' : '🔇 No audio';
-                    
                     document.getElementById('connectBtn').style.display = 'none';
                     document.getElementById('disconnectBtn').style.display = 'inline-block';
+                    document.getElementById('troubleshoot').style.display = 'none';
                     
+                    const hasAudio = remoteStream.getAudioTracks().length > 0;
+                    const audioStatus = hasAudio ? '🔊 Audio ON' : '🔇 No audio';
                     showStatus('viewStatus', 'success', `✅ Connected! ${audioStatus}`);
+                    updateViewConnectionStatus('connected', 'Receiving screen');
+                });
+                
+                call.on('error', function(err) {
+                    console.error('Call error:', err);
+                    if (!connected) {
+                        showStatus('viewStatus', 'error', '❌ Connection failed');
+                        document.getElementById('troubleshoot').style.display = 'block';
+                        disconnectFromScreen();
+                    }
                 });
                 
                 call.on('close', function() {
                     disconnectFromScreen();
                 });
                 
-                call.on('error', function(err) {
-                    console.error('Call error:', err);
-                    showStatus('viewStatus', 'error', '❌ Connection failed');
-                    disconnectFromScreen();
-                });
-                
-                // Timeout if no connection
+                // Timeout
                 setTimeout(() => {
                     if (!connected) {
-                        showStatus('viewStatus', 'error', '❌ Could not connect. Check the code and make sure the laptop is sharing.');
+                        showStatus('viewStatus', 'error', '❌ Connection timeout - check the code');
+                        document.getElementById('troubleshoot').style.display = 'block';
                         disconnectFromScreen();
                     }
                 }, 8000);
                 
             } catch (err) {
                 console.error('Connection error:', err);
-                showStatus('viewStatus', 'error', '❌ Connection failed. Is the code correct?');
+                showStatus('viewStatus', 'error', '❌ Could not connect');
+                document.getElementById('troubleshoot').style.display = 'block';
                 document.getElementById('connectBtn').disabled = false;
             }
         }
         
-        // Disconnect from screen
+        // Disconnect
         function disconnectFromScreen() {
             if (call) {
                 call.close();
@@ -651,10 +764,11 @@
             document.getElementById('connectBtn').disabled = false;
             document.getElementById('disconnectBtn').style.display = 'none';
             
-            showStatus('viewStatus', 'info', '📡 Disconnected');
+            showStatus('viewStatus', 'info', 'Disconnected');
+            updateViewConnectionStatus('waiting', 'Ready to connect');
         }
         
-        // Copy code to clipboard
+        // Copy code
         function copyCode() {
             const code = document.getElementById('myCode').textContent;
             navigator.clipboard.writeText(code).then(() => {
@@ -663,10 +777,24 @@
                 setTimeout(() => {
                     btn.textContent = '📋 Copy';
                 }, 2000);
+            }).catch(() => {
+                // Fallback for older browsers
+                const input = document.createElement('input');
+                input.value = code;
+                document.body.appendChild(input);
+                input.select();
+                document.execCommand('copy');
+                document.body.removeChild(input);
+                
+                const btn = document.querySelector('.copy-btn');
+                btn.textContent = '✅ Copied!';
+                setTimeout(() => {
+                    btn.textContent = '📋 Copy';
+                }, 2000);
             });
         }
         
-        // Show status message
+        // Show status
         function showStatus(elementId, type, message) {
             const element = document.getElementById(elementId);
             element.className = 'status ' + type;
@@ -674,15 +802,28 @@
             element.style.display = message ? 'block' : 'none';
         }
         
-        // Auto-uppercase input
+        // Auto uppercase
         document.getElementById('codeInput').addEventListener('input', function(e) {
             e.target.value = e.target.value.toUpperCase();
         });
         
-        // Check browser compatibility
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
-            showStatus('shareStatus', 'error', '❌ Your browser doesn\'t support screen sharing. Use Chrome, Edge, or Firefox.');
-        }
+        // Initialize on load
+        window.addEventListener('load', async function() {
+            // Check browser support
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+                showStatus('shareStatus', 'error', '❌ Browser doesn\'t support screen sharing');
+                return;
+            }
+            
+            // Initialize peer
+            try {
+                await initializePeer();
+            } catch (err) {
+                console.error('Initialization failed:', err);
+                updateConnectionStatus('error', 'Failed to connect to server');
+                showStatus('shareStatus', 'error', '❌ Could not connect to server. Try refreshing the page.');
+            }
+        });
     </script>
 </body>
 </html>
